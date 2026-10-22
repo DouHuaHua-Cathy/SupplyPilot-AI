@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "SupplyPilot AI"
+description = "A lightweight prototype for Malaysian small businesses to compare purchase orders with supplier messages and identify quantity or delivery discrepancies using transparent deterministic rules."
+version = "1.0.0"
+id = "artifacts/supplypilot-ai"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 20237
+
+[services.development]
+run = "pnpm --filter @workspace/supplypilot-ai run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/supplypilot-ai", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/supplypilot-ai/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "20237"
+BASE_PATH = "/"

@@ -1,0 +1,1 @@
+- [SupplyPilot product scope](supplypilot-scope.md) — Stage 1 is a fictional-data prototype with deterministic rules, no live integrations or cloud services.

@@ -14,23 +14,124 @@ import {
   purchaseLines,
   type Analysis,
 } from './message-analysis';
+import {
+  createReview,
+  decideReview,
+  editReviewDraft,
+  loadWorkflow,
+  PURCHASE_ORDER_ID,
+  saveWorkflow,
+  type DemoRole,
+  type ReviewStatus,
+  type WorkflowData,
+} from './approval-workflow';
 
 const queryClient = new QueryClient();
 const initialMessage = 'Hi boss, we can deliver 35kg flour and 20kg butter on 26 Oct 2026. Sugar is currently unavailable. Remaining flour can be delivered next week.';
 
+function browserStorage() {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function getInitialWorkflow() {
+  const storage = browserStorage();
+  const loaded = loadWorkflow(storage);
+  if (loaded.data.reviews.length > 0) return loaded;
+  const seeded = createReview(loaded.data, initialMessage, buildClarificationMessage(analyzeMessage(initialMessage)), 'Demo Staff', 'Staff');
+  const saved = loaded.warning ? false : saveWorkflow(storage, seeded);
+  return {
+    data: seeded,
+    warning: loaded.warning ?? (saved ? null : 'Browser storage is unavailable or full. Changes will last only until this page closes.'),
+  };
+}
+
+function actorFor(role: DemoRole) {
+  return role === 'Owner' ? 'Demo Owner' : 'Demo Staff';
+}
+
+function prettyTimestamp(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat('en-MY', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+}
+
+const statusLabel: Record<ReviewStatus, string> = { Pending: 'Awaiting owner decision', Approved: 'Approved', Rejected: 'Rejected' };
+
 function Home() {
-  const [message, setMessage] = useState(initialMessage);
-  const [analysis, setAnalysis] = useState<Analysis | null>(() => analyzeMessage(initialMessage));
+  const [workflowState, setWorkflowState] = useState(getInitialWorkflow);
+  const [message, setMessage] = useState(() => workflowState.data.reviews.find((review) => review.id === workflowState.data.activeReviewId)?.supplierMessage ?? initialMessage);
+  const [role, setRole] = useState<DemoRole>('Staff');
+  const [draftInput, setDraftInput] = useState(() => workflowState.data.reviews.find((review) => review.id === workflowState.data.activeReviewId)?.followUpMessage ?? '');
+  const [workflowFeedback, setWorkflowFeedback] = useState('');
   const [error, setError] = useState('');
 
+  const workflow = workflowState.data;
+  const activeReview = workflow.reviews.find((review) => review.id === workflow.activeReviewId) ?? null;
+  const analysis: Analysis | null = activeReview ? analyzeMessage(activeReview.supplierMessage) : null;
+  const storage = browserStorage();
+
+  function commitWorkflow(next: WorkflowData) {
+    const saved = saveWorkflow(storage, next);
+    setWorkflowState({
+      data: next,
+      warning: saved ? null : 'Browser storage is unavailable or full. Changes will last only until this page closes.',
+    });
+  }
+
   function handleAnalyze() {
-    setAnalysis(null);
     if (!message.trim()) {
       setError('Add the supplier’s message before checking it. You can paste the relevant WhatsApp-style text here.');
       return;
     }
     setError('');
-    setAnalysis(analyzeMessage(message));
+    const next = createReview(workflow, message, buildClarificationMessage(analyzeMessage(message)), actorFor(role), role);
+    setDraftInput(next.reviews[0].followUpMessage);
+    setWorkflowFeedback('A new review was created as Pending. Earlier activity remains in the log.');
+    commitWorkflow(next);
+  }
+
+  function handleSaveDraft() {
+    if (!activeReview || activeReview.status !== 'Pending') return;
+    const next = editReviewDraft(workflow, activeReview.id, draftInput, actorFor(role), role);
+    if (next === workflow) return;
+    commitWorkflow(next);
+    setWorkflowFeedback('Draft saved. It has not been sent to the supplier.');
+  }
+
+  function handleDecision(decision: 'Approved' | 'Rejected') {
+    if (role !== 'Owner') {
+      setWorkflowFeedback('Only the demo Owner can approve or reject this review.');
+      return;
+    }
+    if (!activeReview) return;
+    let next = workflow;
+    if (activeReview.status !== 'Pending') {
+      setWorkflowFeedback('This review already has a final decision.');
+      return;
+    }
+    if (draftInput !== activeReview.followUpMessage) {
+      next = editReviewDraft(next, activeReview.id, draftInput, actorFor(role), role);
+    }
+    const result = decideReview(next, activeReview.id, decision, role, actorFor(role));
+    if (!result.ok) {
+      setWorkflowFeedback(result.reason === 'owner_only' ? 'Only the demo Owner can approve or reject this review.' : 'This review can no longer be changed.');
+      return;
+    }
+    commitWorkflow(result.data);
+    setWorkflowFeedback(decision === 'Approved' ? 'Review approved. The message remains a draft until you copy it and send it yourself.' : 'Review rejected. No message was sent.');
+  }
+
+  async function handleCopyApprovedMessage() {
+    if (!activeReview || activeReview.status !== 'Approved' || !activeReview.followUpMessage.trim()) return;
+    try {
+      await navigator.clipboard.writeText(activeReview.followUpMessage);
+      setWorkflowFeedback('Approved message copied. It has not been sent to the supplier.');
+    } catch {
+      setWorkflowFeedback('Clipboard access is unavailable here. You can select and copy the approved message manually.');
+    }
   }
 
   const overview = analysis ? getAnalysisOverview(analysis) : null;
@@ -53,7 +154,7 @@ function Home() {
           <span className="sp-mark"><Wheat size={18} strokeWidth={2.3} aria-hidden="true" /></span>
           <span>SupplyPilot <span style={{ color: '#ed9852' }}>AI</span></span>
         </div>
-        <div className="sp-top-meta"><ShieldCheck size={15} aria-hidden="true" /><span>PRIVATE STAGE 1 PROTOTYPE</span></div>
+        <div className="sp-top-meta"><ShieldCheck size={15} aria-hidden="true" /><span>PRIVATE STAGE 2 DEMO</span></div>
       </header>
 
       <main className="sp-main">
@@ -80,7 +181,7 @@ function Home() {
             <div className="sp-card-heading">
               <div>
                 <h2 className="sp-card-title">Supplier message</h2>
-                <p className="sp-card-description">Paste the message you received. Nothing is sent or stored.</p>
+                <p className="sp-card-description">Paste the message you received. Review data is saved only in this browser for the demo.</p>
               </div>
               <div className="sp-rule-pill" data-testid="status-rule-based"><Sparkles size={13} aria-hidden="true" /> Rule-based extraction</div>
             </div>
@@ -89,7 +190,7 @@ function Home() {
               id="supplier-message"
               className="sp-textarea"
               value={message}
-              onChange={(event) => { setMessage(event.target.value); setError(''); setAnalysis(null); }}
+              onChange={(event) => { setMessage(event.target.value); setError(''); }}
               placeholder="Paste supplier message here…"
               aria-describedby="message-help"
               data-testid="input-supplier-message"
@@ -121,6 +222,19 @@ function Home() {
             <div className="sp-side-foot"><CircleHelp size={15} aria-hidden="true" /><span>Only details stated in the message can be checked. Anything else stays unknown.</span></div>
           </aside>
         </div>
+
+        <section className="sp-review-controls" aria-label="Demo approval controls">
+          <div className="sp-role-control">
+            <label htmlFor="demo-role">Demo role</label>
+            <select id="demo-role" value={role} onChange={(event) => { setRole(event.target.value as DemoRole); setWorkflowFeedback(''); }} data-testid="select-demo-role">
+              <option value="Staff">Staff</option>
+              <option value="Owner">Owner</option>
+            </select>
+            <span>Demo-only simulated access control</span>
+          </div>
+          {activeReview && <div className={`sp-status-pill is-${activeReview.status.toLowerCase()}`} data-testid="status-review">{statusLabel[activeReview.status]}</div>}
+        </section>
+        {workflowState.warning && <div className="sp-storage-warning" role="status" data-testid="status-storage-warning">{workflowState.warning}</div>}
 
         {analysis && (
           <section className="sp-results" aria-live="polite" data-testid="section-analysis-results">
@@ -188,9 +302,14 @@ function Home() {
                     <div className="sp-next-step-label">Recommended next action</div>
                     <strong data-testid="text-recommended-action">Request confirmation from supplier</strong>
                   </div>
-                  <span className="sp-next-step-note">Suggested clarification · Not sent</span>
+                  <span className="sp-next-step-note">Draft · Not sent</span>
                 </div>
-                <p data-testid="text-suggested-clarification">{buildClarificationMessage(analysis)}</p>
+                <label className="sp-label" htmlFor="follow-up-draft">Supplier follow-up draft</label>
+                <textarea id="follow-up-draft" className="sp-textarea sp-draft-textarea" value={draftInput} onChange={(event) => setDraftInput(event.target.value)} disabled={activeReview?.status !== 'Pending'} data-testid="input-follow-up-draft" />
+                <div className="sp-draft-actions">
+                  <span>This message has not been sent. Review and edit it before the Owner decides.</span>
+                  <button type="button" className="sp-secondary-button" onClick={handleSaveDraft} disabled={activeReview?.status !== 'Pending' || draftInput === activeReview?.followUpMessage}>Save draft</button>
+                </div>
               </div>
             )}
             <div className="sp-unrecognized" data-testid="text-parsing-limits">
@@ -198,7 +317,46 @@ function Home() {
             </div>
           </section>
         )}
-        <footer className="sp-footer">SUPPLYPILOT · STAGE 1 PROTOTYPE · ALL DATA SHOWN IS FICTIONAL</footer>
+        {activeReview && (
+          <section className="sp-approval-card" aria-label="Human approval" data-testid="section-human-approval">
+            <div className="sp-approval-copy">
+              <div className="sp-next-step-label">Human decision · {PURCHASE_ORDER_ID}</div>
+              <strong>{activeReview.status === 'Pending' ? 'Owner review required' : `Review ${activeReview.status.toLowerCase()}`}</strong>
+              <span>{activeReview.status === 'Pending' ? 'The Owner checks the comparison and draft, then records a decision.' : `Decision recorded by ${workflow.events.find((event) => event.reviewId === activeReview.id && (event.actionType === 'approved' || event.actionType === 'rejected'))?.actor ?? 'Demo Owner'}.`}</span>
+            </div>
+            <div className="sp-approval-actions">
+              <button type="button" className="sp-reject-button" onClick={() => handleDecision('Rejected')} disabled={role !== 'Owner' || activeReview.status !== 'Pending'} data-testid="button-reject">Reject</button>
+              <button type="button" className="sp-approve-button" onClick={() => handleDecision('Approved')} disabled={role !== 'Owner' || activeReview.status !== 'Pending'} data-testid="button-approve"><Check size={15} aria-hidden="true" /> Approve</button>
+            </div>
+            {role !== 'Owner' && activeReview.status === 'Pending' && <p className="sp-role-hint">Switch to the demo Owner role to record the approval decision.</p>}
+          </section>
+        )}
+
+        {activeReview?.status === 'Approved' && activeReview.followUpMessage.trim() && (
+          <section className="sp-approved-message" aria-label="Approved message output" data-testid="section-approved-message">
+            <div><strong>Approved message</strong><span>Copy it if you choose to contact the supplier. SupplyPilot never sends it automatically.</span></div>
+            <textarea className="sp-textarea" value={activeReview.followUpMessage} readOnly data-testid="text-approved-message" />
+            <button type="button" className="sp-secondary-button" onClick={handleCopyApprovedMessage} data-testid="button-copy-approved"><FileText size={14} aria-hidden="true" /> Copy approved message</button>
+          </section>
+        )}
+
+        {workflowFeedback && <div className="sp-workflow-feedback" role="status" aria-live="polite" data-testid="text-workflow-feedback">{workflowFeedback}</div>}
+
+        <section className="sp-activity-card" aria-label="Activity log" data-testid="section-activity-log">
+          <div className="sp-activity-heading"><div><div className="sp-next-step-label">This browser only · Demo activity</div><h2>Activity log</h2></div><span>{workflow.events.length} {workflow.events.length === 1 ? 'event' : 'events'}</span></div>
+          {workflow.events.length === 0 ? <p className="sp-activity-empty">No activity recorded yet.</p> : (
+            <ol className="sp-activity-list">
+              {workflow.events.slice(0, 12).map((event) => (
+                <li key={event.id} data-testid={`activity-${event.actionType}-${event.id}`}>
+                  <span className={`sp-activity-dot is-${event.currentStatus.toLowerCase()}`} aria-hidden="true" />
+                  <div><strong>{event.actionType === 'analysis' ? 'Message analyzed' : event.actionType === 'draft_edited' ? 'Follow-up draft edited' : event.actionType === 'approved' ? 'Review approved' : 'Review rejected'}</strong><span>{event.summary}</span><small>{event.actor} · {event.role} · {prettyTimestamp(event.timestamp)} · {event.purchaseOrderId} · {event.currentStatus}</small></div>
+                </li>
+              ))}
+            </ol>
+          )}
+          <p className="sp-activity-note">Demo record stored in this browser’s localStorage. It is not a production audit log.</p>
+        </section>
+        <footer className="sp-footer">SUPPLYPILOT · STAGE 2 DEMO · ALL DATA SHOWN IS FICTIONAL</footer>
       </main>
     </div>
   );

@@ -9,6 +9,7 @@
     "serve": "vite preview --config vite.config.ts --host 0.0.0.0",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --experimental-strip-types --test src/message-analysis.test.ts"
+    "test": "node --experimental-strip-types --test src/message-analysis.test.ts src/approval-workflow.test.ts"
   },
   "devDependencies": {
     "@hookform/resolvers": "^3.10.0",

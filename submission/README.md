@@ -6,9 +6,9 @@
 
 ## Submission Materials
 
-- Project Proposal: `SDC2026_CtrlMe_Preliminary.pdf`
-- Technical & Tools Declaration: `SDC2026_CtrlMe_TechDeclaration.pdf`
-- Pitch Deck: `SDC2026_CtrlMe_PitchDeck.pptx`
+- Project Proposal: `SDC2026_Ctrl + Me_Preliminary.pdf`
+- Technical & Tools Declaration: `SDC2026_Ctrl + Me_TechDeclaration.pdf`
+- Pitch Deck: `SDC2026_Ctrl + Me_PitchDeck.pptx`
 
 ## Project Links
 

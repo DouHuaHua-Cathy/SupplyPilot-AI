@@ -8,7 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --test src/lib/supplier-extraction.test.ts"
+    "test": "node --experimental-strip-types --test src/lib/supplier-extraction.test.ts src/lib/supplier-analysis-protection.test.ts"
   },
   "dependencies": {
     "@google/genai": "2.30.0",

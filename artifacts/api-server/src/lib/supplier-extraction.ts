@@ -147,7 +147,8 @@ export async function extractSupplierFacts(
     ...extraction.items.flatMap((item) => item.evidence),
     ...extraction.deliveryDates.flatMap((date) => date.evidence),
   ];
-  if (quotes.some((quote) => !message.includes(quote))) {
+  const sourceText = message.toLocaleLowerCase();
+  if (quotes.some((quote) => !sourceText.includes(quote.toLocaleLowerCase()))) {
     logSafeFailure({ category: "invalid_structured_output", elapsedMs: elapsedMs(startedAt), selectedModel, reason: "evidence_not_in_source" }, "OpenAI output failed evidence validation");
     throw new SupplierExtractionError("OpenAI returned data that did not pass evidence validation. No AI result was used; try rule-based analysis.", 502);
   }

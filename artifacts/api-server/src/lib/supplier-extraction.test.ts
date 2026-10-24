@@ -108,6 +108,27 @@ test("invalid JSON, invalid response JSON, schema failures, and unquoted evidenc
   }), (error: unknown) => error instanceof SupplierExtractionError && error.statusCode === 502);
 });
 
+test("evidence matching is case-insensitive but still requires a source quote", async () => {
+  const caseVariant = {
+    ...valid,
+    items: [{ ...valid.items[0], evidence: ["35KG FLOUR"] }],
+  };
+  const accepted = await extractSupplierFacts(message, {
+    apiKey: "test", baseURL: "https://replit-ai.test/v1",
+    fetchImpl: async () => response(JSON.stringify(caseVariant)),
+  });
+  assert.equal(accepted.items[0].evidence[0], "35KG FLOUR");
+
+  const invented = {
+    ...valid,
+    items: [{ ...valid.items[0], evidence: ["35kg rice"] }],
+  };
+  await assert.rejects(extractSupplierFacts(message, {
+    apiKey: "test", baseURL: "https://replit-ai.test/v1",
+    fetchImpl: async () => response(JSON.stringify(invented)),
+  }), (error: unknown) => error instanceof SupplierExtractionError && /evidence validation/i.test(error.message));
+});
+
 test("invalid supplier input and overlong messages are rejected before fetch", async () => {
   let calls = 0;
   const fetchImpl = async () => { calls += 1; return response(JSON.stringify(valid)); };

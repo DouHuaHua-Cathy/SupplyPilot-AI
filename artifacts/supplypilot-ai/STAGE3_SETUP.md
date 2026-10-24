@@ -7,7 +7,7 @@
 - pnpm 11
 - Replit AI Integrations with OpenAI enabled (no external API key)
 
-The Express API uses Replit-managed OpenAI credentials and requests the fixed `gpt-5-mini` model with strict JSON Schema output. Each AI analysis uses Replit credits according to provider token pricing; the local rule-based mode makes no model request. The API applies a 60-second timeout, one request per analysis, and no automatic retries.
+The Express API uses Replit-managed OpenAI credentials and requests the fixed `gpt-5-mini` model with strict JSON Schema output. Each AI analysis uses Replit credits according to provider token pricing; the local rule-based mode makes no model request. The API applies a 60-second timeout, one request per analysis, and no automatic retries. `SUPPLIER_AI_DAILY_LIMIT` sets the shared per-process daily AI request cap (default: 25; set to `0` to disable AI).
 
 ## Install on Windows
 

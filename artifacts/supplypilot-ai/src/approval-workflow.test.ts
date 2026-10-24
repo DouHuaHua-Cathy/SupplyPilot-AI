@@ -100,6 +100,35 @@ test('localStorage save and reload preserve reviews and activity', () => {
   assert.equal(values.has(WORKFLOW_STORAGE_KEY), true);
 });
 
+test('OpenRouter analyses are logged and legacy Gemini browser history remains readable', () => {
+  const openrouter = createReview(
+    { reviews: [], events: [], activeReviewId: null },
+    'Supplier confirms 35kg flour.',
+    'Please confirm the balance.',
+    'Demo Staff',
+    'Staff',
+    { idFactory: makeIds(), analysisSource: 'openrouter' },
+  );
+  assert.equal(openrouter.reviews[0].analysisSource, 'openrouter');
+  assert.match(openrouter.events[0].summary, /OpenRouter AI \(Free Router\)/);
+
+  const legacy = createReview(
+    { reviews: [], events: [], activeReviewId: null },
+    'Previously analyzed message.',
+    'Previous draft.',
+    'Demo Staff',
+    'Staff',
+    { idFactory: makeIds(), analysisSource: 'gemini' },
+  );
+  const storage: KeyValueStorage = {
+    getItem: () => JSON.stringify(legacy),
+    setItem: () => undefined,
+  };
+  const restored = loadWorkflow(storage);
+  assert.equal(restored.warning, null);
+  assert.equal(restored.data.reviews[0].analysisSource, 'gemini');
+});
+
 test('duplicate final decisions do not create duplicate approval or rejection events', () => {
   const pending = startReview();
   const reviewId = pending.activeReviewId!;

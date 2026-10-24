@@ -1,4 +1,8 @@
+import { SupplierExtractionSchema, type SupplierExtraction } from "@workspace/api-zod/supplierExtraction";
+
 export type DemoRole = 'Staff' | 'Owner';
+// Keep legacy 'gemini' accepted so existing browser history remains readable after provider migration.
+export type AnalysisSource = 'openrouter' | 'gemini' | 'rules';
 export type ReviewStatus = 'Pending' | 'Approved' | 'Rejected';
 export type ActivityAction = 'analysis' | 'draft_edited' | 'approved' | 'rejected';
 
@@ -9,6 +13,8 @@ export type ReviewRecord = {
   followUpMessage: string;
   status: ReviewStatus;
   createdAt: string;
+  analysisSource?: AnalysisSource;
+  extraction?: SupplierExtraction;
 };
 
 export type ActivityEvent = {
@@ -58,7 +64,9 @@ function isReview(value: unknown): value is ReviewRecord {
     typeof value.supplierMessage === 'string' &&
     typeof value.followUpMessage === 'string' &&
     (value.status === 'Pending' || value.status === 'Approved' || value.status === 'Rejected') &&
-    typeof value.createdAt === 'string';
+    typeof value.createdAt === 'string' &&
+    (value.analysisSource === undefined || value.analysisSource === 'openrouter' || value.analysisSource === 'gemini' || value.analysisSource === 'rules') &&
+    (value.extraction === undefined || SupplierExtractionSchema.safeParse(value.extraction).success);
 }
 
 function isEvent(value: unknown): value is ActivityEvent {
@@ -134,7 +142,7 @@ export function createReview(
   followUpMessage: string,
   actor: string,
   role: DemoRole,
-  options: { idFactory?: () => string; now?: () => string } = {},
+  options: { idFactory?: () => string; now?: () => string; analysisSource?: AnalysisSource; extraction?: SupplierExtraction } = {},
 ): WorkflowData {
   const idFactory = options.idFactory ?? createId;
   const timestamp = (options.now ?? (() => new Date().toISOString()))();
@@ -145,9 +153,12 @@ export function createReview(
     followUpMessage,
     status: 'Pending',
     createdAt: timestamp,
+    analysisSource: options.analysisSource ?? 'rules',
+    ...(options.extraction ? { extraction: options.extraction } : {}),
   };
   const next = { ...data, reviews: [review, ...data.reviews], activeReviewId: review.id };
-  return addEvent(next, review, 'analysis', actor, role, `Supplier message analyzed: ${supplierMessage.slice(0, 180)}`, timestamp, idFactory);
+  const providerLabel = review.analysisSource === 'openrouter' ? 'OpenRouter AI (Free Router)' : review.analysisSource === 'gemini' ? 'legacy Gemini AI' : 'rule-based analysis';
+  return addEvent(next, review, 'analysis', actor, role, `Supplier message analyzed via ${providerLabel}: ${supplierMessage.slice(0, 150)}`, timestamp, idFactory);
 }
 
 export function editReviewDraft(

@@ -1,4 +1,4 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AlertCircle, AlertTriangle, CalendarDays, Check, CircleHelp, ClipboardList, FileText, ShieldCheck, Sparkles, Wheat } from 'lucide-react';
 import { ErrorBoundary } from '@/components/error-boundary';
@@ -8,12 +8,14 @@ import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
 import {
   analyzeMessage,
+  analyzeExtractedMessage,
   buildClarificationMessage,
   formatDate,
   getAnalysisOverview,
   purchaseLines,
   type Analysis,
 } from './message-analysis';
+import { SupplierExtractionSchema, type SupplierExtraction } from '@workspace/api-zod/supplierExtraction';
 import {
   createReview,
   decideReview,
@@ -67,10 +69,18 @@ function Home() {
   const [draftInput, setDraftInput] = useState(() => workflowState.data.reviews.find((review) => review.id === workflowState.data.activeReviewId)?.followUpMessage ?? '');
   const [workflowFeedback, setWorkflowFeedback] = useState('');
   const [error, setError] = useState('');
+  const [analysisMode, setAnalysisMode] = useState<'openrouter' | 'rules'>('openrouter');
+  const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [analysisNotice, setAnalysisNotice] = useState('');
+  const analysisInFlight = useRef(false);
 
   const workflow = workflowState.data;
   const activeReview = workflow.reviews.find((review) => review.id === workflow.activeReviewId) ?? null;
-  const analysis: Analysis | null = activeReview ? analyzeMessage(activeReview.supplierMessage) : null;
+  const analysis: Analysis | null = activeReview
+    ? (activeReview.analysisSource === 'openrouter' || activeReview.analysisSource === 'gemini') && activeReview.extraction
+      ? analyzeExtractedMessage(activeReview.extraction)
+      : analyzeMessage(activeReview.supplierMessage)
+    : null;
   const storage = browserStorage();
 
   function commitWorkflow(next: WorkflowData) {
@@ -81,16 +91,63 @@ function Home() {
     });
   }
 
-  function handleAnalyze() {
+  async function handleAnalyze() {
+    if (analysisInFlight.current) return;
     if (!message.trim()) {
       setError('Add the supplier’s message before checking it. You can paste the relevant WhatsApp-style text here.');
       return;
     }
+    if (message.length > 5000) {
+      setError('Supplier messages must be 5,000 characters or fewer.');
+      return;
+    }
+    analysisInFlight.current = true;
+    setAnalysisBusy(true);
     setError('');
-    const next = createReview(workflow, message, buildClarificationMessage(analyzeMessage(message)), actorFor(role), role);
+    setAnalysisNotice('');
+    let source: 'openrouter' | 'rules' = 'rules';
+    let extraction: SupplierExtraction | undefined;
+    let compared = analyzeMessage(message);
+    if (analysisMode === 'openrouter') {
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), 65_000);
+      try {
+        const response = await fetch('/api/analyze-message', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message }),
+          signal: controller.signal,
+        });
+        const payload: unknown = await response.json();
+        const data = payload as { error?: unknown; extraction?: unknown };
+        if (!response.ok) throw new Error(typeof data.error === 'string' ? data.error : 'OpenRouter analysis could not be completed.');
+        const parsed = SupplierExtractionSchema.safeParse(data.extraction);
+        if (!parsed.success) throw new Error('OpenRouter result did not pass browser validation. Rule-based results are shown instead.');
+        extraction = parsed.data;
+        compared = analyzeExtractedMessage(extraction);
+        source = 'openrouter';
+      } catch (cause) {
+        const reason = cause instanceof Error && cause.name === 'AbortError'
+          ? 'OpenRouter request timed out.'
+          : cause instanceof TypeError
+            ? 'Could not reach the OpenRouter API server.'
+            : cause instanceof SyntaxError
+              ? 'OpenRouter API server returned an unreadable response.'
+              : cause instanceof Error ? cause.message : 'OpenRouter analysis is unavailable.';
+        setAnalysisNotice(`${reason} Showing the rule-based result instead; no AI result was used.`);
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+    const next = createReview(workflow, message, buildClarificationMessage(compared), actorFor(role), role, {
+      analysisSource: source,
+      ...(extraction ? { extraction } : {}),
+    });
     setDraftInput(next.reviews[0].followUpMessage);
     setWorkflowFeedback('A new review was created as Pending. Earlier activity remains in the log.');
     commitWorkflow(next);
+    setAnalysisBusy(false);
+    analysisInFlight.current = false;
   }
 
   function handleSaveDraft() {
@@ -154,7 +211,7 @@ function Home() {
           <span className="sp-mark"><Wheat size={18} strokeWidth={2.3} aria-hidden="true" /></span>
           <span>SupplyPilot <span style={{ color: '#ed9852' }}>AI</span></span>
         </div>
-        <div className="sp-top-meta"><ShieldCheck size={15} aria-hidden="true" /><span>PRIVATE STAGE 2 DEMO</span></div>
+        <div className="sp-top-meta"><ShieldCheck size={15} aria-hidden="true" /><span>PRIVATE STAGE 3 DEMO</span></div>
       </header>
 
       <main className="sp-main">
@@ -183,7 +240,7 @@ function Home() {
                 <h2 className="sp-card-title">Supplier message</h2>
                 <p className="sp-card-description">Paste the message you received. Review data is saved only in this browser for the demo.</p>
               </div>
-              <div className="sp-rule-pill" data-testid="status-rule-based"><Sparkles size={13} aria-hidden="true" /> Rule-based extraction</div>
+              <div className="sp-rule-pill" data-testid="status-analysis-mode"><Sparkles size={13} aria-hidden="true" /> {analysisMode === 'openrouter' ? 'OpenRouter AI (Free Router)' : 'Rule-based demo'}</div>
             </div>
             <label className="sp-label" htmlFor="supplier-message">Message text</label>
             <textarea
@@ -192,19 +249,27 @@ function Home() {
               value={message}
               onChange={(event) => { setMessage(event.target.value); setError(''); }}
               placeholder="Paste supplier message here…"
+              maxLength={5000}
               aria-describedby="message-help"
               data-testid="input-supplier-message"
             />
             <div className="sp-input-foot" id="message-help">
-              <span>Plain text only. Review the result before acting.</span>
+              <span>Use synthetic demo text only. OpenRouter mode sends this text to a dynamically selected free model.</span>
               <span aria-live="polite" data-testid="text-message-length">{message.length} characters</span>
             </div>
             <div className="sp-button-row">
-              <button type="button" className="sp-primary-button" onClick={handleAnalyze} data-testid="button-check-discrepancies">
-                <FileText size={16} aria-hidden="true" /> Check for discrepancies
+              <label className="sp-mode-control" htmlFor="analysis-mode">Analysis mode
+                <select id="analysis-mode" value={analysisMode} onChange={(event) => setAnalysisMode(event.target.value as 'openrouter' | 'rules')} data-testid="select-analysis-mode">
+                  <option value="openrouter">OpenRouter AI (Free Router)</option>
+                  <option value="rules">Rule-based demo (offline)</option>
+                </select>
+              </label>
+              <button type="button" className="sp-primary-button" onClick={handleAnalyze} disabled={analysisBusy} data-testid="button-check-discrepancies">
+                <FileText size={16} aria-hidden="true" /> {analysisBusy ? 'Analyzing…' : 'Check for discrepancies'}
               </button>
-              <span className="sp-button-note">A simple, local rules check.<br />No AI guesswork.</span>
+              <span className="sp-button-note">{analysisMode === 'openrouter' ? 'Free Router extracts evidence; PO checks stay deterministic. Allow up to 60 seconds.' : 'Local rules only. No AI request is sent.'}</span>
             </div>
+            {analysisBusy && <div className="sp-workflow-feedback" role="status" aria-live="polite">Analyzing supplier message…</div>}
             {error && (
               <div role="alert" className="sp-error" data-testid="status-analysis-error">
                 <AlertCircle size={15} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} aria-hidden="true" />{error}
@@ -250,9 +315,12 @@ function Home() {
                 <strong data-testid="text-analysis-status">
                   {overview?.needsReview ? 'Analysis Complete — Needs Review' : 'Analysis Complete — Confirmed'}
                 </strong>
-                <span>Rule-based extraction. Missing confirmations are shown separately from explicit shortages or delivery differences.</span>
+                <span>{activeReview?.analysisSource === 'openrouter' || activeReview?.analysisSource === 'gemini' ? `${activeReview.analysisSource === 'openrouter' ? 'OpenRouter AI (Free Router)' : 'Legacy Gemini AI'} extracted supplier evidence; deterministic TypeScript compared validated facts with the purchase order.` : 'Rule-based fallback/demo extraction. Missing confirmations are shown separately from explicit shortages or delivery differences.'}</span>
               </div>
             </div>
+            {(activeReview?.analysisSource === 'openrouter' || activeReview?.analysisSource === 'gemini') && <div className="sp-unrecognized" data-testid="status-openrouter-analysis">Source: {activeReview.analysisSource === 'openrouter' ? 'OpenRouter AI (Free Router)' : 'Legacy Gemini AI'}. Supporting evidence is extracted from the supplier message; purchase-order comparison remains deterministic.</div>}
+            {activeReview?.analysisSource !== 'openrouter' && activeReview?.analysisSource !== 'gemini' && <div className="sp-unrecognized" data-testid="status-rules-analysis">Source: Rule-based {analysisMode === 'rules' ? 'demo' : 'fallback'}. This result is not AI-generated.</div>}
+            {analysisNotice && <div role="status" className="sp-error" data-testid="status-analysis-fallback">{analysisNotice}</div>}
             <div className="sp-results-grid">
               <div className="sp-card sp-result-card">
                 <h3>Line-by-line comparison</h3>
@@ -272,7 +340,7 @@ function Home() {
                   {analysis.lines.map((line) => (
                     <div className="sp-issue" key={line.name} data-testid={`explanation-${line.name.toLowerCase()}`}>
                       {line.badge === 'ok' ? <Check size={14} aria-hidden="true" /> : <AlertTriangle size={14} aria-hidden="true" />}
-                      <span><strong>{line.name}:</strong> {line.explanation}</span>
+                      <span><strong>{line.name}:</strong> {line.explanation}{line.evidence?.map((quote, index) => <small className="sp-evidence-quote" key={`${index}-${quote}`}>Evidence: “{quote}”</small>)}</span>
                     </div>
                   ))}
                 </div>
@@ -356,7 +424,7 @@ function Home() {
           )}
           <p className="sp-activity-note">Demo record stored in this browser’s localStorage. It is not a production audit log.</p>
         </section>
-        <footer className="sp-footer">SUPPLYPILOT · STAGE 2 DEMO · ALL DATA SHOWN IS FICTIONAL</footer>
+        <footer className="sp-footer">SUPPLYPILOT · STAGE 3 DEMO · ALL DATA SHOWN IS FICTIONAL</footer>
       </main>
     </div>
   );

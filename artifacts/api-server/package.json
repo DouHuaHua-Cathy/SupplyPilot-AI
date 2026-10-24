@@ -7,15 +7,18 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test src/lib/supplier-extraction.test.ts src/lib/supplier-analysis-protection.test.ts"
   },
   "dependencies": {
+    "@google/genai": "2.30.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "drizzle-orm": "catalog:",
     "express": "^5.3.0",
+    "openai": "^7.43.0",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0"
   },

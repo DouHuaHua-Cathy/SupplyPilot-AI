@@ -1,3 +1,5 @@
+import type { SupplierExtraction } from "@workspace/api-zod/supplierExtraction";
+
 export const purchaseLines = [
   { name: 'Flour', quantity: 50, aliases: ['flour'] },
   { name: 'Butter', quantity: 20, aliases: ['butter'] },
@@ -19,12 +21,63 @@ export type LineResult = {
   status: string;
   badge: 'warn' | 'ok' | 'neutral';
   explanation: string;
+  evidence?: string[];
 };
 
 export type Analysis = {
   lines: LineResult[];
   messageDate: Date | null;
 };
+
+/** Compare only validated, unambiguous supplier evidence against the fixed PO values. */
+export function analyzeExtractedMessage(extraction: SupplierExtraction): Analysis {
+  const lines = purchaseLines.map((line): LineResult => {
+    const matchingFacts = extraction.items.filter((candidate) => {
+      const names = [candidate.productName, ...candidate.aliases].map((value) => value.trim().toLowerCase());
+      return line.aliases.some((alias) => names.includes(alias.toLowerCase())) || names.includes(line.name.toLowerCase());
+    });
+    const signatures = new Set(matchingFacts.filter((candidate) => candidate.confirmed || candidate.availability === 'unavailable').map((candidate) => `${candidate.availability}|${candidate.quantity}|${candidate.unit?.toLowerCase() ?? ''}`));
+    const conflicting = signatures.size > 1 || matchingFacts.some((candidate) => candidate.ambiguous);
+    const fact = !conflicting ? matchingFacts.find((candidate) => candidate.confirmed) ?? matchingFacts[0] : undefined;
+    const mentioned = matchingFacts.length > 0;
+    const unavailable = fact?.availability === "unavailable";
+    const normalizedUnit = fact?.unit?.toLowerCase().replace(/kilograms?/, "kg").replace(/s$/, "");
+    const quantity = fact && fact.confirmed && !fact.ambiguous && normalizedUnit === "kg"
+      ? fact.quantity
+      : null;
+
+    if (unavailable) return {
+      name: line.name, ordered: line.quantity, confirmed: null, unavailable: true, mentioned: true,
+      status: "Unavailable", badge: "warn", evidence: fact?.evidence,
+      explanation: `Supplier explicitly says ${line.name.toLowerCase()} is unavailable. All ${line.quantity} kg remain unresolved.`,
+    };
+    if (quantity === null) return {
+      name: line.name, ordered: line.quantity, confirmed: null, unavailable: false, mentioned,
+      status: "Not Confirmed", badge: "neutral", evidence: fact?.evidence,
+      explanation: mentioned
+        ? `Supplier mentioned ${line.name.toLowerCase()}, but no single confirmed kg quantity could be safely compared${conflicting ? ' because details conflict or are ambiguous' : ''}.`
+        : "No supplier confirmation for this item was detected.",
+    };
+
+    const gap = Math.max(0, line.quantity - quantity);
+    return {
+      name: line.name, ordered: line.quantity, confirmed: quantity, unavailable: false, mentioned: true,
+      status: gap > 0 ? `${gap} kg short` : quantity >= line.quantity ? "Fully confirmed" : "Part-confirmed",
+      badge: gap > 0 ? "warn" : "ok", evidence: fact?.evidence,
+      explanation: gap > 0
+        ? `${quantity} kg stated against ${line.quantity} kg ordered; ${gap} kg is not covered by this confirmation.`
+        : `${quantity} kg stated against ${line.quantity} kg ordered; the order quantity is covered.`,
+    };
+  });
+
+  const confirmedDates = extraction.deliveryDates.filter((date) => date.confirmed && !date.ambiguous && date.dateISO)
+    .map((date) => date.dateISO as string);
+  const uniqueDates = [...new Set(confirmedDates)];
+  const messageDate = uniqueDates.length === 1
+    ? new Date(`${uniqueDates[0]}T00:00:00.000Z`)
+    : null;
+  return { lines, messageDate: messageDate && !Number.isNaN(messageDate.getTime()) ? messageDate : null };
+}
 
 export type AnalysisOverview = {
   dateDelta: number | null;

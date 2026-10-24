@@ -8,20 +8,26 @@ router = "path"
 
 [[services]]
 name = "web"
-paths = [ "/" ]
+paths = ["/"]
 localPort = 20237
 
 [services.development]
 run = "pnpm --filter @workspace/supplypilot-ai run dev"
 
-[services.production]
-build = [ "pnpm", "--filter", "@workspace/supplypilot-ai", "run", "build" ]
-serve = "static"
-publicDir = "artifacts/supplypilot-ai/dist/public"
+[services.production.build]
+args = ["pnpm", "run", "build:supplypilot"]
 
-[[services.production.rewrites]]
-from = "/*"
-to = "/index.html"
+[services.production.build.env]
+NODE_ENV = "production"
+PORT = "20237"
+BASE_PATH = "/"
+
+[services.production.run]
+args = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
+
+[services.production.run.env]
+NODE_ENV = "production"
+SUPPLYPILOT_SERVE_WEB = "true"
 
 [services.env]
 PORT = "20237"

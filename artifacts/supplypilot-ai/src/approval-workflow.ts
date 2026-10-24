@@ -2,7 +2,7 @@ import { SupplierExtractionSchema, type SupplierExtraction } from "@workspace/ap
 
 export type DemoRole = 'Staff' | 'Owner';
 // Keep legacy 'gemini' accepted so existing browser history remains readable after provider migration.
-export type AnalysisSource = 'openrouter' | 'gemini' | 'rules';
+export type AnalysisSource = 'openai' | 'openrouter' | 'gemini' | 'rules';
 export type ReviewStatus = 'Pending' | 'Approved' | 'Rejected';
 export type ActivityAction = 'analysis' | 'draft_edited' | 'approved' | 'rejected';
 
@@ -65,7 +65,7 @@ function isReview(value: unknown): value is ReviewRecord {
     typeof value.followUpMessage === 'string' &&
     (value.status === 'Pending' || value.status === 'Approved' || value.status === 'Rejected') &&
     typeof value.createdAt === 'string' &&
-    (value.analysisSource === undefined || value.analysisSource === 'openrouter' || value.analysisSource === 'gemini' || value.analysisSource === 'rules') &&
+    (value.analysisSource === undefined || value.analysisSource === 'openai' || value.analysisSource === 'openrouter' || value.analysisSource === 'gemini' || value.analysisSource === 'rules') &&
     (value.extraction === undefined || SupplierExtractionSchema.safeParse(value.extraction).success);
 }
 
@@ -157,7 +157,7 @@ export function createReview(
     ...(options.extraction ? { extraction: options.extraction } : {}),
   };
   const next = { ...data, reviews: [review, ...data.reviews], activeReviewId: review.id };
-  const providerLabel = review.analysisSource === 'openrouter' ? 'OpenRouter AI (Free Router)' : review.analysisSource === 'gemini' ? 'legacy Gemini AI' : 'rule-based analysis';
+  const providerLabel = review.analysisSource === 'openai' ? 'OpenAI via Replit AI Integrations' : review.analysisSource === 'openrouter' ? 'legacy OpenRouter AI' : review.analysisSource === 'gemini' ? 'legacy Gemini AI' : 'rule-based analysis';
   return addEvent(next, review, 'analysis', actor, role, `Supplier message analyzed via ${providerLabel}: ${supplierMessage.slice(0, 150)}`, timestamp, idFactory);
 }
 

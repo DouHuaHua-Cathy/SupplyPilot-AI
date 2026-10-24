@@ -41,7 +41,7 @@ router.post("/analyze-message", async (req, res) => {
       res.status(error.statusCode).json({ error: error.message });
       return;
     }
-    console.warn(JSON.stringify({ event: "openrouter_route_failure", category: "unexpected_error", elapsedMs: Math.max(0, Date.now() - startedAt), selectedModel: null }));
+    console.warn(JSON.stringify({ event: "openai_route_failure", category: "unexpected_error", elapsedMs: Math.max(0, Date.now() - startedAt), selectedModel: null }));
     res.status(502).json({ error: "Supplier message analysis failed. Use the rule-based analyzer instead." });
   }
 });

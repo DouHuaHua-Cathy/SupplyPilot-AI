@@ -94,3 +94,9 @@ This is a hackathon prototype, not a production procurement system.
 ## License
 
 Apache License 2.0. See `LICENSE` for details.
+
+## Replit Utilisation Evidence
+
+This project was developed, AI-integrated, tested, and deployed using Replit.
+
+[View Replit Development, AI Integration, and Deployment Evidence](https://github.com/DouHuaHua-Cathy/SupplyPilot-AI/tree/main/docs/evidence)
